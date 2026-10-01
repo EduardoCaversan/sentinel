@@ -9,7 +9,7 @@ Register an endpoint, inspect its checks, and follow an incident from repeated f
 Requirements: Docker Engine/Desktop with Linux containers and Docker Compose v2.24+. No host PHP, Composer, Node, or Make is required.
 
 ```bash
-git clone <your-repository-url> sentinel
+git clone https://github.com/EduardoCaversan/sentinel.git
 cd sentinel
 cp .env.example .env
 docker compose up --build -d --wait
