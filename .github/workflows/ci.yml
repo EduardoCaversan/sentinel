@@ -1,0 +1,39 @@
+name: CI
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build, install locked dependencies, validate OpenAPI, and boot
+        run: docker compose up --build -d --wait
+      - name: Composer validation
+        run: docker compose exec -T app composer validate --strict
+      - name: Pint
+        run: docker compose exec -T app vendor/bin/pint --test
+      - name: Tests with SQLite
+        run: docker compose exec -T app php artisan test
+      - name: Prepare isolated MariaDB test database
+        run: |
+          docker compose cp scripts/create-test-database.sh mariadb:/tmp/create-test-database.sh
+          docker compose exec -T mariadb sh /tmp/create-test-database.sh
+      - name: Tests with MariaDB
+        run: docker compose exec -T app vendor/bin/phpunit --configuration=phpunit.mariadb.xml
+      - name: Container readiness and operations
+        run: |
+          curl --fail http://localhost:8080/health/ready
+          curl --fail --output /dev/null http://localhost:8080/docs
+          docker compose exec -T app php artisan horizon:status
+          docker compose exec -T app php artisan schedule:list
+          docker compose exec -T app php scripts/verify-locks.php
+      - name: Logs on failure
+        if: failure()
+        run: docker compose logs --tail=100
+      - name: Stop stack
+        if: always()
+        run: docker compose down
