@@ -7,7 +7,7 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: Build, install locked dependencies, validate OpenAPI, and boot
@@ -16,6 +16,8 @@ jobs:
         run: docker compose exec -T app composer validate --strict
       - name: Pint
         run: docker compose exec -T app vendor/bin/pint --test
+      - name: Larastan level 5
+        run: docker compose exec -T app composer analyse
       - name: Tests with SQLite
         run: docker compose exec -T app php artisan test
       - name: Prepare isolated MariaDB test database
@@ -31,6 +33,13 @@ jobs:
           docker compose exec -T app php artisan horizon:status
           docker compose exec -T app php artisan schedule:list
           docker compose exec -T app php scripts/verify-locks.php
+          docker compose exec -T app php artisan sentinel:operations
+      - name: Concurrent MariaDB transactions
+        run: |
+          docker compose exec -T app php scripts/verify-upgrade.php
+          docker compose exec -T app php scripts/verify-concurrency.php
+      - name: Production image
+        run: docker build --target production -t sentinel:production .
       - name: Logs on failure
         if: failure()
         run: docker compose logs --tail=100

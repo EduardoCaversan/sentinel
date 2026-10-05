@@ -9,8 +9,10 @@ use App\Http\Resources\CheckResource;
 use App\Http\Resources\IncidentResource;
 use App\Jobs\CheckMonitorJob;
 use App\Models\Monitor;
+use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+use Illuminate\Support\Facades\RateLimiter;
 
 class MonitorActivityController extends Controller
 {
@@ -26,6 +28,11 @@ class MonitorActivityController extends Controller
 
     public function check(Monitor $monitor): JsonResponse
     {
+        $rateKey = 'manual-check:'.$monitor->organization_id;
+        if (RateLimiter::tooManyAttempts($rateKey, 6)) {
+            throw new HttpResponseException(response()->json(['message' => 'Too many manual checks for this organization.'], 429, ['Retry-After' => RateLimiter::availableIn($rateKey)]));
+        }
+        RateLimiter::hit($rateKey, 60);
         abort_unless($monitor->is_active, 409, 'Activate the monitor before requesting a check.');
         CheckMonitorJob::dispatch($monitor->id);
 

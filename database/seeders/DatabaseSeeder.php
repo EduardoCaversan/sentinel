@@ -3,6 +3,7 @@
 namespace Database\Seeders;
 
 use App\Enums\CheckStatus;
+use App\Models\StatusPage;
 use App\Models\User;
 use App\Services\RecordCheck;
 use Illuminate\Database\Console\Seeds\WithoutModelEvents;
@@ -26,9 +27,12 @@ class DatabaseSeeder extends Seeder
             return;
         }
         $user = User::firstOrCreate(['email' => strtolower($email)], ['name' => 'Sentinel Demo', 'password' => $password]);
+        $organization = $user->personalOrganization();
+        $components = [];
         foreach (['Payment API', 'Authentication API', 'Checkout API'] as $index => $name) {
-            $monitor = $user->monitors()->firstOrCreate(['name' => $name], ['url' => 'https://example.com', 'interval_seconds' => 300]);
+            $monitor = $organization->monitors()->firstOrCreate(['name' => $name], ['url' => 'https://example.com', 'interval_seconds' => max(300, config('sentinel.min_interval_seconds'))]);
             $monitor->refresh();
+            $components[$monitor->id] = ['name' => $name, 'position' => $index];
             if ($monitor->checks()->exists()) {
                 continue;
             }
@@ -43,6 +47,13 @@ class DatabaseSeeder extends Seeder
                     'checked_at' => now()->subMinutes((count($sequence) - $step) * 5),
                 ]);
             }
+        }
+        $page = StatusPage::firstOrCreate(
+            ['organization_id' => $organization->id, 'slug' => 'sentinel-demo-'.$organization->id],
+            ['name' => 'Sentinel Demo Status', 'description' => 'Demonstration services; all probes target example.com.', 'is_published' => true],
+        );
+        if ($page->wasRecentlyCreated) {
+            $page->monitors()->sync($components);
         }
     }
 }

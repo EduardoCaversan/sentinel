@@ -24,10 +24,10 @@ class AuthController extends Controller
     public function login(AuthRequest $request): JsonResponse
     {
         $user = User::where('email', $request->validated('email'))->first();
-        if (! Hash::check($request->validated('password'), $user?->password ?? '$2y$12$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2uheWG/igi.')) {
+        if (! Hash::check($request->validated('password'), $user->password ?? '$2y$12$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2uheWG/igi.')) {
             abort(401, 'Invalid credentials.');
         }
-        abort_unless($user, 401, 'Invalid credentials.');
+        abort_unless($user !== null, 401, 'Invalid credentials.');
 
         return $this->token($user);
     }
@@ -46,8 +46,9 @@ class AuthController extends Controller
 
     private function token(User $user, int $status = 200): JsonResponse
     {
+        $user->personalOrganization();
         $expires = now()->addDays(7);
 
-        return response()->json(['data' => ['user' => new UserResource($user), 'token' => $user->createToken('api', ['*'], $expires)->plainTextToken, 'token_type' => 'Bearer', 'expires_at' => $expires->toISOString()]], $status);
+        return response()->json(['data' => ['user' => new UserResource($user), 'token' => $user->createToken('api', ['*'], $expires)->plainTextToken, 'token_type' => 'Bearer', 'expires_at' => $expires->toISOString()]], $status)->header('Cache-Control', 'no-store');
     }
 }

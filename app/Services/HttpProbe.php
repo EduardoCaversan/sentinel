@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Enums\CheckStatus;
+use App\Exceptions\ResponseTooLarge;
 use App\Exceptions\UnsafeTarget;
 use App\Models\Monitor;
 use GuzzleHttp\Exception\TransferException;
@@ -34,10 +35,15 @@ class HttpProbe
                 'allow_redirects' => false,
                 'sink' => $sink,
                 'verify' => true,
+                'progress' => function ($total, $downloaded): void {
+                    if ($downloaded > config('sentinel.response_max_bytes')) {
+                        throw new ResponseTooLarge;
+                    }
+                },
             ])->setHandler(new CurlHandler) // Stream handlers cannot enforce CURLOPT_RESOLVE.
                 ->connectTimeout(min(5, $monitor->timeout_seconds))
                 ->timeout($monitor->timeout_seconds)
-                ->withUserAgent('Sentinel/1.0')
+                ->withUserAgent('Sentinel/2.0')
                 ->get($monitor->url);
             $result['http_status_code'] = $response->status();
             $result['status'] = $response->status() === $monitor->expected_status_code ? CheckStatus::Success : CheckStatus::Failure;
@@ -45,6 +51,9 @@ class HttpProbe
                 $result['error_type'] = 'unexpected_status';
                 $result['error_message'] = 'The endpoint returned an unexpected HTTP status.';
             }
+        } catch (ResponseTooLarge) {
+            $result['error_type'] = 'response_too_large';
+            $result['error_message'] = 'The endpoint exceeded the response size limit.';
         } catch (UnsafeTarget $exception) {
             $result['error_type'] = 'unsafe_target';
             $result['error_message'] = 'Target blocked or DNS resolution failed.';

@@ -2,6 +2,9 @@ FROM node:22-alpine AS swagger
 WORKDIR /assets
 RUN npm install --ignore-scripts --no-audit --no-fund swagger-ui-dist@5.31.0 @apidevtools/swagger-parser@12.1.0
 COPY public/openapi.json /assets/openapi.json
+COPY docs/openapi-v1.json /docs/openapi-v1.json
+COPY scripts/build-openapi.mjs /scripts/build-openapi.mjs
+RUN mkdir /public && cp /assets/openapi.json /public/openapi.json && node /scripts/build-openapi.mjs --check
 RUN node -e "require('@apidevtools/swagger-parser').validate('/assets/openapi.json').then(() => console.log('OpenAPI valid')).catch(e => { console.error(e.message); process.exit(1); })"
 
 FROM php:8.4-apache AS base

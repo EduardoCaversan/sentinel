@@ -97,7 +97,10 @@ return [
 
     'cipher' => 'AES-256-CBC',
 
-    'key' => env('APP_KEY'),
+    // Local Docker initialization stores the generated key in the shared volume.
+    // CLI processes do not inherit the entrypoint's exported environment.
+    'key' => env('APP_KEY') ?: (env('APP_ENV') === 'local' && is_file(storage_path('app.key'))
+        ? trim(file_get_contents(storage_path('app.key'))) : null),
 
     'previous_keys' => [
         ...array_filter(

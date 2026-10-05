@@ -6,10 +6,12 @@ namespace App\Http\Controllers;
 
 use App\Enums\IncidentStatus;
 use App\Enums\MonitorStatus;
+use App\Http\Middleware\OrganizationAccess;
 use App\Http\Requests\MonitorRequest;
 use App\Http\Requests\PageRequest;
 use App\Http\Resources\MonitorResource;
 use App\Models\Monitor;
+use App\Services\Quota;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\DB;
@@ -18,12 +20,22 @@ class MonitorController extends Controller
 {
     public function index(PageRequest $request): AnonymousResourceCollection
     {
-        return MonitorResource::collection($request->user()->monitors()->latest('id')->paginate($request->pageSize())->withQueryString());
+        return MonitorResource::collection(OrganizationAccess::organization($request)->monitors()->latest('id')->paginate($request->pageSize())->withQueryString());
     }
 
     public function store(MonitorRequest $request): MonitorResource
     {
-        return new MonitorResource($request->user()->monitors()->create($request->validated())->refresh());
+        $organization = OrganizationAccess::organization($request);
+        $monitor = app(Quota::class)->create($organization, 'monitors', function () use ($organization, $request): Monitor {
+            $monitor = new Monitor(['interval_seconds' => config('sentinel.min_interval_seconds'), ...$request->validated()]);
+            $monitor->organization_id = $organization->id;
+            $monitor->user_id = $request->user()?->id;
+            $monitor->save();
+
+            return $monitor->refresh();
+        });
+
+        return new MonitorResource($monitor);
     }
 
     public function show(Monitor $monitor): MonitorResource

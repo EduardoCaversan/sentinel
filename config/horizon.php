@@ -14,6 +14,11 @@ return [
     'fast_termination' => false,
     'memory_limit' => 64,
     'defaults' => [
+        'notifications' => [
+            'connection' => 'redis', 'queue' => ['notifications'], 'balance' => 'simple',
+            'minProcesses' => 1, 'maxProcesses' => 1, 'maxTime' => 3600, 'maxJobs' => 500,
+            'memory' => 128, 'tries' => 1, 'timeout' => 45, 'nice' => 0,
+        ],
         'checks' => [
             'connection' => 'redis', 'queue' => ['checks'], 'balance' => 'auto',
             'autoScalingStrategy' => 'time', 'minProcesses' => 1, 'maxProcesses' => 2,
@@ -21,5 +26,5 @@ return [
             'tries' => 1, 'timeout' => 60, 'nice' => 0,
         ],
     ],
-    'environments' => ['production' => ['checks' => []], 'local' => ['checks' => []]],
+    'environments' => ['production' => ['checks' => [], 'notifications' => []], 'local' => ['checks' => [], 'notifications' => []]],
 ];

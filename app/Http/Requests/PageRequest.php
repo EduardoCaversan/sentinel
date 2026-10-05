@@ -10,7 +10,7 @@ class PageRequest extends FormRequest
 {
     public function authorize(): bool
     {
-        return $this->user() !== null;
+        return $this->user() !== null || $this->attributes->has('api_key');
     }
 
     public function rules(): array

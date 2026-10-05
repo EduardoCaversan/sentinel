@@ -1,250 +1,302 @@
-# Sentinel
+<p align="center"><img src="public/brand/sentinel.svg" width="64" alt="Sentinel"></p>
+<h1 align="center">Sentinel</h1>
+<p align="center">HTTP monitoring and incident management for teams.</p>
+<p align="center">
+<a href="https://github.com/EduardoCaversan/sentinel/actions/workflows/ci.yml"><img src="https://github.com/EduardoCaversan/sentinel/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+<img src="https://img.shields.io/badge/PHP-8.4-777BB4" alt="PHP 8.4">
+<img src="https://img.shields.io/badge/Laravel-12-FF2D20" alt="Laravel 12">
+<a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license"></a>
+</p>
 
-**HTTP monitoring and automatic incident management, exposed through a Laravel API.**
+Sentinel checks public HTTP endpoints, opens incidents after consecutive failures, and resolves them after sustained recovery. V2 adds organization boundaries, team roles, automation credentials, asynchronous notifications, maintenance windows, availability metrics, and public status pages.
 
-Register an endpoint, inspect its checks, and follow an incident from repeated failures through recovery. Sentinel V1 concentrates on that complete flow. There is no frontend application; Swagger UI is the interactive interface.
+The API is the product interface. The self-hosted Swagger UI supports the complete workflow; there is no SPA or frontend build to run.
 
-## Start here
+![Sentinel API reference](docs/images/docs.png)
 
-Requirements: Docker Engine/Desktop with Linux containers and Docker Compose v2.24+. No host PHP, Composer, Node, or Make is required.
+## Quick start
 
-```bash
+Requires Docker Engine with the Compose plugin (Docker Desktop on Windows/macOS). No PHP, Composer, Node, or Make installation is needed on the host.
+
+~~~sh
 git clone https://github.com/EduardoCaversan/sentinel.git
 cd sentinel
 cp .env.example .env
 docker compose up --build -d --wait
-```
+~~~
 
-On PowerShell, use `Copy-Item .env.example .env`. Alternatively, `make setup` starts the same stack, using local defaults if `.env` is absent.
+PowerShell: `Copy-Item .env.example .env` is equivalent to the copy command.
 
-Open **[localhost:8080/docs](http://localhost:8080/docs)**. The initial build downloads dependencies and compiles PHP extensions; later builds reuse those layers. Initialization creates a persistent local application key and runs migrations. Application, worker, and scheduler start after initialization succeeds.
-
-If port 8080 is unavailable, set `APP_PORT=18080` and `APP_URL=http://localhost:18080` in `.env`, then run `docker compose up -d --wait` again. The API is bound to the host's loopback interface.
-
-| URL | Purpose |
+| Address | Purpose |
 | --- | --- |
-| `/` | Product information and discovery links |
-| `/docs` | Swagger UI with Authorize and Try it out |
-| `/openapi.json` | OpenAPI 3.0 specification |
-| `/health` | Application liveness |
-| `/health/ready` | MariaDB and Redis connectivity; 503 on failure |
-| `/api/v1` | Versioned API route prefix |
+| http://localhost:8080 | Technical landing |
+| http://localhost:8080/docs | Interactive Swagger UI |
+| http://localhost:8080/openapi.json | OpenAPI contract |
+| http://localhost:8080/health | Process liveness |
+| http://localhost:8080/health/ready | MariaDB and Redis readiness |
 
-## What V1 does
+Initialization generates a local encryption key in the shared storage volume and applies migrations. MariaDB, Redis, Apache/PHP, Horizon, and scheduler start together. Port 8080 binds to loopback; change `APP_PORT` and `APP_URL` if needed.
 
-- Sanctum Bearer tokens: registration, login, current user, logout, seven-day expiry.
-- Owner-scoped monitor CRUD, paginated check history and incidents.
-- Scheduled GET requests and manual asynchronous checks.
-- Consecutive failure/recovery thresholds, automatic opening and resolution.
-- Redis queue deduplication and execution locks, transactional result recording, database-enforced uniqueness of open incidents.
-- Public-address validation, connection pinning, disabled redirects and sanitized network errors.
-- JSON logs with monitor, check, incident and execution IDs.
-- Docker setup, demo seeding, automated tests, Pint and GitHub Actions.
+`make setup`, `make up`, `make down`, `make test`, `make lint`, `make analyse`, `make operations`, `make logs`, and `make shell` are optional conveniences.
+
+## Demonstrate it through Swagger
+
+1. Open `/docs`. Under **Authentication**, use **POST /api/v2/auth/register**. Choose an email and password (12–72 characters, a letter and a number, matching confirmation).
+2. Copy `data.token`. Click **Authorize**, paste the token without the `Bearer` prefix, apply credentials, and close the dialog. Authorization clears on reload.
+3. Under **Organizations**, list your organizations. Registration creates a personal organization for compatibility. Optionally create a shared organization and copy its ID.
+4. Under **Monitors**, create a monitor in that organization:
+
+   ~~~json
+   {
+     "name": "Payment API",
+     "url": "https://example.com",
+     "expected_status_code": 503,
+     "interval_seconds": 300,
+     "failure_threshold": 2,
+     "recovery_threshold": 2,
+     "slo_target": 99.9
+   }
+   ~~~
+
+   The deliberately different expected status makes example.com's normal HTTP 200 count as a failure.
+5. Under **Checks**, request a manual check, wait for its history entry, and repeat. After two failures, inspect **Incidents**, acknowledge the incident, add a note, and read its timeline.
+6. Patch `expected_status_code` to `200`; run two more checks. The incident resolves automatically. Manual requests return `202` and are deduplicated while queued/running.
+7. Under **Analytics**, inspect the monitor's `24h` metrics and SLO. Timestamps have second precision; a check in the current second may appear on the next refresh.
+8. Under **Maintenance**, create a future window using UTC dates within the next 90 days.
+9. Under **Status Pages**, create a page with explicit component aliases and `is_published: true`. Visit `/status/{slug}` or the unauthenticated `/api/v2/status/{slug}`.
+10. Under **API Keys**, create an organization key with selected scopes. Replace the personal token in **Authorize** to test automation access. Account/member/key administration requires a personal token.
+11. Under **Notifications**, configure your own public HTTPS receiver or Slack/Discord webhook. URLs and signing secrets are write-only. Inspect delivery attempts after the next subscribed transition.
+
+No fixed credentials are shipped. To seed an example account, three monitors, 16 historical checks, a resolved incident, and a public demo status page, set `DEMO_SEED=true`, `DEMO_EMAIL`, and a strong `DEMO_PASSWORD` in `.env`, then rerun Compose. The seeder is idempotent and publishes only the selected demo components. All demo monitors target `example.com`; their histories are synthetic.
+
+## V2 capabilities
+
+- Organizations: owner/admin/member/viewer roles, single-use invitations, member removal, leaving, and ownership transfer.
+- Organization API keys: random secrets shown once, SHA-256 hashes, explicit scopes, expiry, revocation, and last-use tracking.
+- GET monitors, paginated checks/incidents, manual checks, and V1 compatibility.
+- Incident acknowledgement by user or key, notes, duration, and a timeline combining retained checks with human/state events.
+- Generic HTTPS webhooks, Slack and Discord; encrypted secrets, durable outbox, retries, and delivery audit.
+- One-time maintenance windows covering selected monitors.
+- Sample uptime, latency average/p50/p95/p99, incident count, clipped downtime, MTTR, and SLO budgets.
+- Public status JSON and escaped server-rendered HTML exposing explicit aliases.
+- Quotas, batched retention, structured logs, private CLI metrics, and liveness/readiness.
+
+**Stack:** PHP 8.4, Laravel 12, MariaDB 11.4, Redis 7.4, Sanctum, Horizon, PHPUnit, Pint, Larastan level 5, OpenAPI 3.0, Swagger UI, Docker Compose, GitHub Actions. PHP dependencies are locked.
 
 ## Architecture
 
-PHP 8.4, Laravel 12, MariaDB 11.4 LTS, Redis 7.4, Horizon 5, Sanctum 4, PHPUnit 11 and Swagger UI 5. Composer dependencies are locked. Apache and PHP run in one image, shared by the web service, Horizon, and scheduler. Swagger assets are bundled into the image; browsing documentation does not depend on a CDN.
-
-```mermaid
+~~~mermaid
 flowchart TD
-    Client[Swagger / API client] --> API[Laravel API + Sanctum]
+    Client[Swagger / API client] --> Auth[Sanctum or scoped organization key]
+    Auth --> Boundary[Organization access and scoped bindings]
+    Boundary --> API[Requests / controllers / resources]
     API --> DB[(MariaDB)]
-    API -->|manual check| Queue[(Redis checks queue)]
-    Scheduler[Laravel Scheduler] -->|due monitors| Queue
-    Queue --> Worker[Horizon / CheckMonitorJob]
-    Worker --> Lock[Redis monitor lock]
-    Lock --> Probe[Validate DNS + pin public IP]
-    Probe --> Target[Public HTTP endpoint]
+    API --> Queue[(Redis queues and locks)]
+    Scheduler[Laravel Scheduler] --> Dispatch[Dispatch due monitors]
+    Dispatch --> Queue
+    Queue --> Worker[Horizon: checks]
+    Worker --> Probe[Public DNS validation + pinned HTTP probe]
     Probe --> Record[RecordCheck transaction]
     Record --> DB
-    Record --> Incident[Open / resolve incident]
-    Incident --> DB
-    Record --> Logs[Structured logs after commit]
-```
+    Record --> Outbox[Durable notification deliveries]
+    Outbox --> NotificationDispatcher[Minute dispatcher]
+    NotificationDispatcher --> Queue
+    Queue --> Delivery[Horizon: notifications]
+    Delivery --> Receiver[Validated HTTPS receiver]
+    Delivery --> DB
+    Public[Public status API / Blade page] --> Published[Explicit publication projection]
+    Published --> DB
+~~~
 
-### Monitoring behavior
+Small concrete services hold business logic: `RecordCheck` centralizes transitions, `PublicTarget` enforces target policy, `WebhookSender` handles provider payloads/transport, and `MonitorAnalytics` performs SQL calculations. No repositories or internal event bus. Persisted outbox events decouple delivery without external work in a monitoring transaction.
 
-`monitors:dispatch` scans due, active monitors every minute and queues jobs in chunks. Checks are never executed inside the scheduler. Intervals range from 60 seconds to 24 hours, in minute increments; execution can be up to one scheduler tick late, plus queue delay. The next due time is calculated after completion.
+### Monitoring lifecycle
 
-| Condition | Result |
-| --- | --- |
-| New monitor | `unknown` |
-| Success without an open incident | `healthy`; failure streak resets |
-| Failure below threshold | `degraded` |
-| Failure threshold reached | `down`; one incident opens |
-| Success during an outage | Recovery streak increases; remains `down` |
-| Failure during recovery | Recovery streak resets |
-| Recovery threshold reached | `healthy`; incident resolves |
+Every minute, the scheduler dispatches unique jobs for active, due monitors. A worker takes a Redis lock, revalidates DNS, pins the public address, and probes with bounded timeout/body size. A database transaction locks the monitor and rejects stale configuration or duplicate execution UUIDs. Check, streaks, incident, timeline transition and outbox rows commit together.
 
-An incident's `started_at` is the threshold-crossing check time. `failure_count` includes the opening streak and later failures; `recovery_count` tracks consecutive recovery successes. A timeout counts as a failure. Unexpected status codes, including redirects, count as failures unless they match the configured status.
+~~~mermaid
+stateDiagram-v2
+    [*] --> Unknown
+    Unknown --> Healthy: success
+    Unknown --> Degraded: failure below threshold
+    Healthy --> Degraded: failure below threshold
+    Degraded --> Healthy: success resets failures
+    Degraded --> Down: failure threshold
+    Down --> Down: failures or incomplete recovery
+    Down --> Healthy: recovery threshold
+~~~
 
-Actual configuration edits reset streaks, schedule another check, and invalidate older in-flight results. An open incident remains open until the new configuration meets its recovery threshold. Pausing preserves incident and health history. Deleting a monitor permanently deletes its checks and incidents.
+A threshold of one can transition directly to down. Acknowledgement leaves automatic recovery enabled. Configuration edits reset streaks; existing incidents stay open until recovery. Deleting a monitor explicitly deletes its history.
 
-### Concurrency guarantees
+### Maintenance
 
-- Unique queued jobs coalesce manual/scheduled requests for a monitor while their 120-second lease exists.
-- A separate 90-second Redis lock prevents simultaneous probes, including duplicate queue deliveries.
-- Job timeout is 45 seconds, Horizon worker timeout 60 seconds, queue retry interval 120 seconds. HTTP timeout is capped at 15 seconds.
-- Recording locks the monitor row and commits the check, counters and incident together. An execution UUID prevents a delivered job from recording twice.
-- A generated nullable `open_slot` plus a unique `(monitor_id, open_slot)` index permits one open incident and any number of resolved incidents. This is tested on both SQLite and MariaDB.
-- A configuration version rejects results collected before a concurrent edit. Deleted and paused monitors are safely skipped.
+Windows are half-open UTC intervals: `[start_at, end_at)`. Checks continue with `in_maintenance=true` and do not affect uptime/SLO or successful-check latency statistics. No incident or notification transition occurs during maintenance. Existing incidents stay open.
 
-These are bounded leases, not an exactly-once queue guarantee. A long backlog can outlive the unique lease and admit another job; monitor locks still prevent overlapping probes. Monitor queue age and capacity. Worker crashes are retried by future scheduled checks rather than immediate network retries.
+Streaks reset across a window, including when no check occurred inside it. Fresh evidence is required afterward. Started windows are immutable through the API; future windows can be cancelled. Recurrence is deferred.
 
-Controllers handle HTTP orchestration, Form Requests validate inputs, Resources define output, and custom route binding scopes every monitor to its owner. `HttpProbe` handles network safety; `RecordCheck` owns the state transitions. No repository layer or unused event hierarchy is needed. Meaningful notification events can be introduced with the first notification side effect.
+### Organizations and roles
 
-## Explore through Swagger
+| Permission | Owner | Admin | Member | Viewer |
+| --- | :---: | :---: | :---: | :---: |
+| Read monitors, incidents, analytics, maintenance, status configuration | ✓ | ✓ | ✓ | ✓ |
+| Operate monitors, acknowledge/note incidents, schedule maintenance | ✓ | ✓ | ✓ | |
+| Update organization, manage non-admin members | ✓ | ✓ | | |
+| Manage keys, notification channels, status pages | ✓ | ✓ | | |
+| Manage administrators / transfer ownership | ✓ | | | |
 
-1. Call `POST /api/v1/auth/register` or log in to an existing account.
-2. Copy `data.token`, click **Authorize**, and paste the token without a `Bearer` prefix.
-3. Create a monitor for `https://example.com`.
-4. Call `POST /api/v1/monitors/{monitor}/check`.
-5. Inspect `/checks`, then the monitor's current status.
-6. To demonstrate an outage, change `expected_status_code` to `503` and use `failure_threshold: 2`. Two completed checks against a target returning 200 open an incident. Change the expectation back to 200; two successful checks resolve it with the default recovery threshold.
+Member/email listings are owner/admin only. Owners transfer before leaving; personal organizations cannot transfer. Removing a member preserves organization data. Monitor `user_id` is an optional creator; `organization_id` determines access.
 
-A manual request returns **202 Accepted**. It can reuse an existing queued/running check; poll history for completion. Paused monitors return 409. No synchronous networking occurs in the API request.
+Invitations reserve member quota, expire in seven days, are hashed in storage, and are accepted once by an account with the invited email. The inviter distributes the one-time token securely; automatic invitation email and email verification are not implemented.
 
-### API conventions
+API key scopes are independent: write does not imply read.
 
-Successful objects use `{"data": {...}}`. Lists add Laravel `links` and `meta`, accept `page` and `per_page` (default 20, maximum 100), and sort newest ID first. Errors use `{"message": "..."}`; validation errors add an `errors` field mapping names to message arrays. Deletion and logout return 204 without a body.
+~~~text
+monitors:read          monitors:write
+incidents:read         incidents:write
+maintenance:read       maintenance:write
+analytics:read
+status-pages:read      status-pages:write
+notifications:read    notifications:write
+~~~
 
-Other owners' resources return 404. Authentication failures return 401. Rate limits are 120 requests/minute per user or guest IP, 10 combined registration/login requests/minute per IP, and six manual checks/minute per user. Limits use Redis in the application stack. Swagger documents all fields, enums, status codes and pagination schemas.
+Optional key expiry is limited to the next year; omit it for no expiry. Keys belong to the organization. Removing a member does not revoke organization automation keys; owner/admin can revoke them explicitly.
 
-```bash
-# Register; choose your own password.
-curl -X POST http://localhost:8080/api/v1/auth/register \
-  -H 'Content-Type: application/json' -H 'Accept: application/json' \
-  -d '{"name":"Ada","email":"ada@example.com","password":"ChooseYourOwn123!","password_confirmation":"ChooseYourOwn123!"}'
+### Notifications
 
-# Set TOKEN to the returned data.token.
-curl -X POST http://localhost:8080/api/v1/monitors \
-  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d '{"name":"Payment API","url":"https://example.com","failure_threshold":3,"recovery_threshold":2}'
+The outbox is written in the check transaction. Queue outages leave committed deliveries pending; the minute dispatcher retries enqueueing. HTTP failures cannot roll back monitoring.
 
-curl -X POST http://localhost:8080/api/v1/monitors/1/check \
-  -H "Authorization: Bearer $TOKEN" -H 'Accept: application/json'
-```
+Five attempts maximum: initial, then 30s / 120s / 600s / 1800s backoff, plus dispatcher/queue delay. Network errors, 408, 425, 429 and 5xx retry. Other non-2xx statuses and blocked targets are terminal. Redirects are never followed. Disabled channels cancel pending deliveries; deleting a channel also deletes its delivery history.
 
-## Demo data
+Generic webhook headers:
 
-Set these values in `.env`, choosing your own password:
+~~~text
+Idempotency-Key: <stable delivery UUID>
+X-Sentinel-Event: incident.opened
+X-Sentinel-Timestamp: <Unix seconds>
+X-Sentinel-Signature: sha256=<HMAC when configured>
+~~~
 
-```dotenv
-DEMO_SEED=true
-DEMO_EMAIL=reviewer@example.com
-DEMO_PASSWORD=replace-with-a-unique-password
-```
+Verify HMAC-SHA256 over `timestamp + "." + exact request body`, enforce timestamp tolerance, and deduplicate `Idempotency-Key`. Delivery is **at least once**: a worker may crash after remote acceptance but before local confirmation. Slack uses plain text blocks; Discord disables mentions. Pending deliveries use current channel configuration.
 
-Run `docker compose up -d --wait`. The init service seeds Payment API, Authentication API and Checkout API, with synthetic historical checks and a resolved incident. These names illustrate a product environment; their live target is `https://example.com`. Seeding is idempotent and does not reset an existing user's password. To seed an already-running stack after environment changes, recreate it first, then run `docker compose exec app php artisan db:seed`.
+Email, Teams, PagerDuty and escalation are deferred. Additional providers can extend the existing payload/validation code and queued transport.
 
-Demo credentials are opt-in and never built into the image. For a public shared demo, disable registration with `REGISTRATION_ENABLED=false`, set monitor/account quotas at the gateway or add them before exposure, and reset demo data regularly. A shared account can edit and delete all of its own demo resources.
+### Analytics / SLO
 
-## Development commands
+The analytics endpoint accepts `24h`, `7d`, `30d`, or a custom range of at most 31 days.
 
-| Make | Docker Compose equivalent |
-| --- | --- |
-| `make setup` | `docker compose up --build -d --wait` |
-| `make up` | `docker compose up -d --wait` |
-| `make down` | `docker compose down` |
-| `make test` | `docker compose exec app php artisan test` |
-| `make lint` | `docker compose exec app vendor/bin/pint --test` |
-| `make logs` | `docker compose logs -f --tail=100` |
-| `make shell` | `docker compose exec app sh` |
+- **Uptime:** successful eligible checks / eligible checks × 100; maintenance excluded.
+- **Latency:** successful eligible checks only; nearest-rank percentiles calculated in SQL.
+- **Downtime:** incident intervals clipped to the range. Detection starts at the failure threshold. Existing incidents include time spent in maintenance.
+- **MTTR:** full duration averaged over incidents resolved in the range; null if none.
+- **Error budget:** eligible samples × (1 − target / 100); remaining budget clamped at zero.
+- No samples means unknown (`null`), not 100%. Responses identify the retention boundary.
 
-Code is copied into the image for portable, reproducible runtime behavior. **Rebuild after source changes** with `docker compose up --build -d --wait`. Data, Redis persistence and runtime storage use named volumes and survive `down`. Removing volumes destroys local data.
+This is sample availability, not a time-weighted SLA. SQL aggregates and ordered offsets avoid loading all checks into application memory.
 
-For native PHP development, use Linux/WSL with PHP 8.4 and Composer 2. Required extensions include cURL, mbstring, PDO MySQL, PDO SQLite (tests), intl, zip, Redis, pcntl and posix (Horizon). Start reachable MariaDB and Redis services, adjust the `.env` hosts, then run:
+## Security and consistency
 
-```bash
-composer install
-php artisan key:generate
-php artisan migrate
-php artisan serve
-# In separate terminals:
-php artisan horizon
-php artisan schedule:work
-```
-
-Docker builds bundle Swagger UI. For native development, copy `/var/www/html/public/vendor` from a built container to `public/vendor`. No frontend build is needed.
-
-### Environment
-
-| Variable | Purpose |
-| --- | --- |
-| `APP_ENV`, `APP_DEBUG` | `local` by default; use `production` and false for deployment |
-| `APP_KEY` | Required external secret in production; generated into persistent storage for local Docker use |
-| `APP_URL`, `APP_PORT` | Public base URL and local mapped port |
-| `DB_*`, `DB_ROOT_PASSWORD` | Database connection and local MariaDB bootstrap credentials |
-| `REDIS_HOST`, `REDIS_PORT` | Queue, cache and distributed lock service |
-| `QUEUE_CONNECTION`, `CACHE_STORE` | Redis in the provided stack |
-| `REDIS_QUEUE_RETRY_AFTER` | 120 seconds; keep longer than the worker timeout and execution lock |
-| `LOG_CHANNEL`, `LOG_LEVEL` | JSON stderr logging in Compose |
-| `REGISTRATION_ENABLED` | Whether new users can register |
-| `DEMO_SEED`, `DEMO_EMAIL`, `DEMO_PASSWORD` | Optional demo data |
-
-Compose deliberately supplies internal service hostnames, database name/user, queue/cache drivers and `APP_DEBUG=false`; use an explicit production Compose override for externally managed services. Host and container environment details are listed in `.env.example` and `compose.yaml`.
-
-## Tests and checks
-
-```bash
-docker compose exec app composer install --no-interaction
-docker compose exec app composer validate --strict
-docker compose exec app php artisan migrate --force
-docker compose exec app php artisan test
-docker compose exec app vendor/bin/pint --test
-docker compose exec app php artisan horizon:status
-docker compose exec app php artisan schedule:list
-docker compose exec app php scripts/verify-locks.php
-```
-
-Default tests use isolated in-memory SQLite, fake public DNS and fake HTTP responses. They cover auth, token revocation, rate limits, every ownership boundary, CRUD, pagination, validation, network outcomes, thresholds, resets, idempotency, lock contention, stale results, duplicate-incident constraints and SSRF. They do not call the public internet.
-
-Run the same suite against a **separate MariaDB test database**:
-
-```bash
-docker compose cp scripts/create-test-database.sh mariadb:/tmp/create-test-database.sh
-docker compose exec mariadb sh /tmp/create-test-database.sh
-docker compose exec app vendor/bin/phpunit --configuration=phpunit.mariadb.xml
-```
-
-`phpunit.mariadb.xml` always uses `sentinel_testing`; tests recreate its tables. Never point it at valuable data. GitHub Actions builds the stack, validates OpenAPI, runs Pint and both database test suites, and checks readiness, Horizon and the scheduler. The workflow itself must run on GitHub after pushing.
-
-An optional end-to-end check uses the actual web server, Redis queue, Horizon, MariaDB and `https://example.com`:
-
-```bash
-docker compose exec app php scripts/smoke.php
-```
-
-Registration must be enabled. The script creates a random account, demonstrates opening/resolving an incident with real HTTPS probes, deletes its monitor, and revokes its token. The account remains for audit. This internet-dependent check is kept out of CI to avoid external-service flakiness.
-
-## Security and operational limits
+- Tenant-scoped resource bindings return 404 for inaccessible IDs; roles and key scopes are checked separately.
+- Only validated fields reach models. Organization, owner, state and configuration version are server-controlled.
+- Public projections omit URLs, internal IDs, notes, maintenance descriptions, membership and secrets. HTML escapes user text. Publication is checked before cache lookup.
+- Sanctum tokens expire after seven days. Keys/invitations are shown once; webhook URLs and HMAC secrets use `APP_KEY` encryption.
+- Rate limits and quotas bound API usage and resource creation. Manual check limits are shared by V1/V2 and organization keys.
+- Redis uniqueness/execution locks, monitor row locks, UUID receipts and a generated open-incident uniqueness constraint protect concurrency.
+- Stale configuration results are discarded. Execution receipts last seven days independently of check retention; queue payloads older than 24h are dropped and due monitors rescheduled.
+- JSON logs contain IDs, durations, statuses and sanitized errors, without arbitrary response bodies, credentials or target URLs.
 
 ### SSRF defenses
 
-URLs are validated when created/changed and again immediately before execution. Only HTTP on port 80 and HTTPS on port 443 are supported. Userinfo, fragments, control characters, backslashes, single-label names and alternate numeric IP formats are rejected. All A/AAAA answers must be public. Private, loopback, link-local, shared-address, multicast, documentation and reserved ranges are blocked; IPv6 is restricted to global unicast, excluding special/tunneling ranges.
+Monitors and webhooks validate all resolved A/AAAA addresses and pin a public address with `CURLOPT_RESOLVE` through cURL. TLS verification stays enabled. Proxies, redirects and connection reuse are disabled. Credentials, fragments, alternate IP encodings, local/private/link-local/reserved ranges and unsafe IPv6 are rejected. HTTP is port 80, HTTPS port 443, webhooks HTTPS only. Timeout and downloaded bytes are bounded.
 
-The worker pins the selected validated address using `CURLOPT_RESOLVE`, preserves the hostname for TLS validation, forces the cURL transport, bypasses environment proxies and disables redirects and connection reuse. This prevents a second DNS lookup from substituting a private address. TLS verification remains enabled. Response bodies go to a null sink and are never persisted. Error messages are fixed strings; raw network exceptions, target URLs and query strings are not logged by the monitoring flow. Apache access logs omit URLs and headers.
+Application checks are not a complete egress boundary. Deploy a firewall blocking internal/metadata destinations, restrict worker egress, and use a trusted resolver. Infrastructure routing and abuse of public targets remain operational concerns. See [Security review](docs/SECURITY-REVIEW.md).
 
-Application validation is **not a substitute for network egress controls**. Production workers should run in an isolated network with firewall rules blocking internal, management and metadata networks for both IPv4 and IPv6. DNS traffic itself is a separate trust boundary. Network routing, publicly addressed internal services, compromised DNS infrastructure and future special-address allocations require operational controls and maintenance.
+## Configuration and retention
 
-V1 downloads/discards bodies until the request timeout; it has no response bandwidth quota. Avoid secrets in monitor URLs: authenticated owners can retrieve them from the database/API. There are no user-supplied headers, payloads or request scripts.
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `REGISTRATION_ENABLED` | `true` | Disable public registration for a controlled demo |
+| `RETENTION_DAYS` | `30` | New organization check/delivery retention |
+| `MAX_RETENTION_DAYS` | `90` | Instance cap, hard maximum 365 days |
+| `MIN_CHECK_INTERVAL_SECONDS` | `60` | Rounded up to a minute; maximum 86400 |
+| `RESPONSE_MAX_BYTES` | `1048576` | Maximum downloaded response bytes |
+| `QUOTA_ORGANIZATIONS` | `5` | Owned shared organizations/user; personal org excluded |
+| `QUOTA_MONITORS` | `50` | Monitors/organization |
+| `QUOTA_MEMBERS` | `25` | Members plus pending invitations/organization |
+| `QUOTA_API_KEYS` | `20` | Unexpired, non-revoked keys/organization |
+| `QUOTA_NOTIFICATION_CHANNELS` | `10` | Channels/organization |
+| `QUOTA_STATUS_PAGES` | `5` | Pages/organization; max 10 components/page |
+| `QUOTA_MAINTENANCE_WINDOWS` | `50` | Active/future windows/organization |
 
-### Deploying
+`sentinel:prune` runs hourly, deleting check and delivery/attempt history in batches of 1000. Incident summaries and human/state events remain; timelines expose the check retention boundary. Expired invitations and old execution receipts are pruned. Lowering a quota does not delete existing resources.
 
-- Build `docker build --target production -t sentinel:production .` to omit development dependencies from the final filesystem.
-- Supply a stable, external `APP_KEY`, unique DB credentials, `APP_ENV=production`, `APP_DEBUG=false`, and an HTTPS `APP_URL`. Local fallback DB passwords are only for development.
-- Run migrations once per deployment before workers and web traffic. Restart Horizon/scheduler on deploy so they pick up code changes. Cache configuration/routes only after runtime secrets are present.
-- Keep one scheduler and one small Horizon supervisor initially. The default worker count scales from one to two processes. Use the same MariaDB and Redis for all replicas.
-- Place TLS termination and request/body limits at a reverse proxy. Configure Laravel trusted proxies narrowly before relying on forwarded scheme/client IP; do not trust arbitrary forwarded headers.
-- MariaDB and Redis have no host-published ports. Put them on private networks, use access controls, backups and retention policies. Redis uses AOF and `noeviction` because evicting locks/queue keys would undermine correctness.
-- Horizon's HTTP dashboard is denied by default, including locally. Use `horizon:status`, `horizon:supervisors`, queue logs and infrastructure metrics. Add explicit operator authentication before exposing the dashboard.
-- Readiness checks database/Redis connectivity, not scheduler freshness or queue age. Alert separately on failed jobs, worker health, dispatch freshness, disk usage and queue backlog.
-- History has no automatic retention or resource quotas in V1. Define retention, monitor/account limits and abuse controls before public registration. Native DNS lookup time is governed by the resolver; the worker timeout bounds a stuck job, but such a killed job may not produce a check row.
+## Tests and verification
 
-## Roadmap
+~~~sh
+docker compose exec app composer validate --strict
+docker compose exec app vendor/bin/pint --test
+docker compose exec app composer analyse
+docker compose exec app php artisan test
 
-Intentionally deferred: organizations/teams, RBAC, notification events and email/Slack/Discord/Teams/webhooks, SSL and TCP monitoring, SLO/SLA and uptime/latency analytics, public status pages, maintenance windows, acknowledgements, postmortems, API key management, escalation policies and multiple monitoring regions. Retention, quotas and operational metrics should precede a public multi-user deployment. Static analysis can be added after the current slice; V1 uses Pint and behavioral tests.
+docker compose cp scripts/create-test-database.sh mariadb:/tmp/create-test-database.sh
+docker compose exec mariadb sh /tmp/create-test-database.sh
+docker compose exec app vendor/bin/phpunit --configuration=phpunit.mariadb.xml
+docker compose exec app php scripts/verify-upgrade.php
+docker compose exec app php scripts/verify-concurrency.php
+docker compose exec app php scripts/verify-locks.php
+~~~
 
-## License
+`verify-upgrade.php` recreates **only `sentinel_testing`**, inserts V1 fixtures and upgrades them. Never point tests at the application database. Tests use HTTP fakes; CI does not depend on public targets.
 
-MIT. See [LICENSE](LICENSE). Bundled Swagger UI retains its upstream license at `public/vendor/SWAGGER-LICENSE` inside the built image.
+Opt-in live checks, with registration enabled and public `https://example.com` access:
+
+~~~sh
+docker compose exec app php scripts/smoke.php
+docker compose exec app php scripts/smoke-v2.php
+~~~
+
+Smoke scripts remove monitors/channels/pages/windows, revoke keys and log out. Empty verification accounts/organizations remain because their deletion is not an API feature.
+
+OpenAPI source: `scripts/build-openapi.mjs` plus the frozen V1 contract in `docs/openapi-v1.json`. Generated artifact: `public/openapi.json`. Docker checks source/artifact parity and validates with Swagger Parser. Regenerate without host Node:
+
+~~~sh
+docker run --rm -v "${PWD}:/workspace" -w /workspace node:22-alpine node scripts/build-openapi.mjs
+~~~
+
+CI verifies Composer, Pint, Larastan, SQLite/MariaDB, OpenAPI, container boot/readiness, Horizon/scheduler, migration upgrade, concurrent transactions, Redis locks and production build. [VERIFICATION.md](docs/VERIFICATION.md) records executed commands, versions, counts and limitations.
+
+## Operations and deployment
+
+~~~sh
+docker compose exec app php artisan sentinel:operations
+docker compose exec app php artisan horizon:status
+docker compose exec app php artisan schedule:list
+docker compose logs --tail=100 app horizon scheduler
+docker build --target production -t sentinel:production .
+~~~
+
+`sentinel:operations` prints private JSON: backlog, failed jobs, check/failure counts, notification failures/pending count, and scheduler freshness. `/health` is liveness; `/health/ready` checks MariaDB/Redis only. Neither proves worker/scheduler health. The header badge reflects dependency readiness. Public API users cannot access the Horizon dashboard.
+
+Deployment considerations:
+
+- Supply a durable `APP_KEY`, unique DB credentials, `APP_ENV=production`, `APP_DEBUG=false`, HTTPS and correct `APP_URL`. The local generated key is never an implicit production fallback. Back up the key to retain access to encrypted webhooks.
+- Run migrations once before workers; app/Horizon/scheduler use the same image and key. Keep Redis/MariaDB private with persistent storage.
+- Terminate TLS at a reverse proxy and explicitly configure trusted proxies. Do not trust arbitrary forwarded client addresses.
+- Use the production target with your service manager or Compose override. The provided Compose file is a local topology, not a public TLS deployment.
+- Configure egress controls and trusted DNS. Restrict registration for a public demo; accounts are not email-verified.
+- Back up MariaDB/key material, watch queue age/failures and tune quotas/retention for disk and worker capacity.
+- Allow graceful shutdown. Job timeouts remain below lock expiry and queue retry intervals. Redis uses `noeviction`; monitor memory rather than evicting locks/jobs.
+- Never use `migrate:fresh` or remove data volumes on a deployed instance.
+
+### Upgrade from V1
+
+Back up MariaDB and encryption key. Stop Horizon/scheduler, deploy the V2 image, migrate, and restart consumers. Existing users receive personal organizations; monitor/check/incident IDs and state are preserved. `/api/v1` continues on the caller's personal organization. Old-format pending jobs are discarded and redispatched by the scheduler.
+
+Tenancy cannot safely roll back after shared resources exist. Its migration requires restoring the pre-V2 backup instead of a destructive `down()`.
+
+## Limitations and roadmap
+
+Single-region HTTP GET monitoring and minute scheduler resolution. No organization deletion, email verification/password reset, invitation email, recurring maintenance or time-weighted SLA. Human incident history remains indefinitely; plan archival for long-lived deployments. No exactly-once external delivery or claim of complete SSRF protection without network controls.
+
+Future: email/Teams/PagerDuty, SSL/TCP monitoring, maintenance recurrence, escalation, public uptime history, multiple regions, postmortems and richer SLO policies. V2 deliberately avoids Kubernetes, a SPA, and ceremonial architecture.
+
+[MIT License](LICENSE) · [V2 audit](docs/V2-AUDIT.md) · [Security review](docs/SECURITY-REVIEW.md) · [Verification evidence](docs/VERIFICATION.md)
